@@ -1,0 +1,95 @@
+---
+title: "Reproducible Research: Peer Assessment 1"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r global_settings}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(lubridate)
+library(stringr)
+library(scales)
+opts_chunk$set(echo=TRUE)
+options(digits = 2)
+```
+
+## Loading and preprocessing the data
+Open the zip file "activity.zip" and read it into the data frame "data".  
+Next, change the "date" variable from character to date type, and convert the "interval" to a time, as "time", by converting the interval value to a 4 digit string, splitting it up and converting it using the "hm" function form lubridate.
+
+```{r readFile}
+data <- read.table(unz("activity.zip","activity.csv"),header=TRUE,sep=",")
+data <- data %>% mutate(date=as.Date(date,format="%Y-%m-%d"))
+temp <- str_pad(data$interval,width=4,pad="0")
+data <- data %>% mutate(time=as.POSIXct(paste(substr(temp,1,2),substr(temp,3,4),sep=":"),format="%H:%M"),tz="America/Chicago")
+```
+
+## What is mean total number of steps taken per day?
+Group steps by day, then sum up all steps, saving it in the variable "TotalSteps".  
+This variable is then displayed in a histogram, with a bin width of 1000 steps.
+
+```{r StepsPerDay}
+stepsPerDay <- data %>% group_by(date) %>% summarize(TotalSteps=sum(steps, na.rm=TRUE))
+stepsPerDay %>% ggplot(aes(TotalSteps)) + geom_histogram(binwidth=1000) + ggtitle("Steps Per Day") + 
+  xlab("Number of Steps") + ylab("Frequency")
+meanSteps <- mean(stepsPerDay$TotalSteps)
+medianSteps <- median(stepsPerDay$TotalSteps)
+```
+
+The mean of the steps per day is `r meanSteps`, and the median is `r medianSteps`.
+
+## What is the average daily activity pattern?
+
+Group steps by interval, the calculate the average number of steps per interval.
+
+```{r dailyaverage}
+dailySteps <- data %>% group_by(time) %>% summarize(steps=mean(steps, na.rm=TRUE))
+dailySteps %>% ggplot(aes(time,steps))+geom_line(size=1.2,color="blue") + 
+  scale_x_datetime(breaks=breaks_width("2 hours"),labels=date_format("%H:%M",tz="America/Chicago")) +
+  ggtitle("Average Daily Activity Pattern") + xlab("Time of Day") + ylab("Number of Steps")
+maxInterval <- which.max(dailySteps$steps)
+maxTime <- format(dailySteps$time[maxInterval],"%H:%M")
+```
+
+The interval with the maximum number of steps is interval `r maxInterval`, which starts at `r maxTime`.
+
+## Imputing missing values
+
+```{r countNAs}
+steps_na <- is.na(data$steps)
+countNA <- sum(steps_na)
+```
+
+The data set has `r countNA` "NA"s in the "steps" variable.  
+Replace all NAs in steps with average # of steps for this interval.  
+```{r impute}
+fixedData <- data
+for (i in seq_len(nrow(fixedData))){
+  if (is.na(fixedData$steps[i])){
+    fixedData$steps[i] <- dailySteps$steps[which(dailySteps$time == fixedData$time[i])]
+  }
+}
+stepsPerDayFixed <- fixedData %>% group_by(date) %>% summarize(totalSteps = sum(steps)) 
+stepsPerDayFixed %>% ggplot(aes(totalSteps)) + 
+  geom_histogram(binwidth=1000) + ggtitle("Steps Per Day, NA's removed") + xlab("Number of Steps") + ylab("Frequency")
+meanStepsFixed <- mean(stepsPerDayFixed$totalSteps)
+medianStepsFixed <- median(stepsPerDayFixed$totalSteps)
+```
+
+The mean number of steps after removing NAs is `r format(meanStepsFixed,scientific=2)` vs. `r meanSteps` before,and the median is `r format(medianStepsFixed,scientific=2)` vs. `r medianSteps`.
+
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+First, we recreate the dataframe congaing average number of steps per interval, based on the "fixedData" frame, and then create a new factor variable "dayType" to indicate if the date is a weekday or a weekend day. Then create a graph showing the weekend data on top and the weekday data on the bottom.
+
+```{r weekend}
+dailyStepsFixed <- fixedData %>% mutate(dayType = factor(weekdays(date) %in% c("Saturday","Sunday"), levels=c(TRUE,FALSE), labels=c("Weekend","Weekday"))) %>% group_by(time,dayType) %>% summarize(steps=mean(steps)) 
+dailyStepsFixed %>% ggplot(aes(time,steps)) + geom_line(size=1.1,aes(color=dayType)) + 
+  facet_wrap(~dayType,nrow=2) + theme(legend.position = "none") +   
+  scale_x_datetime(breaks=breaks_width("2 hours"),labels=date_format("%H:%M",tz="America/Chicago")) +
+  ggtitle("Average Daily Activity Pattern") + xlab("Time of Day") + ylab("Number of Steps")
+```
